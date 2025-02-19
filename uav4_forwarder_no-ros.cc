@@ -79,6 +79,8 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <chrono>
+#include <iomanip>
  
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
@@ -86,6 +88,8 @@
 #include "ns3/applications-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/fd-net-device-module.h"
+#include <ctime>
+
 
 using namespace ns3;
  
@@ -96,6 +100,7 @@ NS_LOG_COMPONENT_DEFINE ("EmuFdNetDeviceSaturationExample");
 //uint32_t flags;
 std::string receivedData;
 std::string msg;
+
 
 /*
 void
@@ -139,22 +144,44 @@ void ReceivePacket(Ptr<Socket> socket)
         uint8_t* buffer = new uint8_t[msg->GetSize()];
         msg->CopyData(buffer, msg->GetSize());
         receivedData = std::string ((char*)buffer);
-        std::cout<<"Received data from uav1: "<<receivedData<<std::endl;
-        socket->Send(msg); 
+
+        auto now =std::chrono::system_clock::now();
+        auto now_in_seconds = std::chrono::system_clock::to_time_t(now);
+        auto duration = now.time_since_epoch();
+        auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
+        auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration);
+
+        std::tm* time_info = std::localtime(&now_in_seconds);
+        std::ostringstream timestamp;
+        timestamp << std::put_time(time_info, "%Y-%m-%d %H:%M:%S");
+        timestamp << "." << std::setw(3) << std::setfill('0') << milliseconds.count() % 1000 << "." << std::setw(9) << std::setfill('0') << nanoseconds.count() % 1000000000;
+
+        std::cout<<"----------------------------------------------------------------------------------";
+        std::cout<<"\nForwarder_Timestamp: " + timestamp.str() + "\n" + receivedData << std::endl;
+        std::cout<<"----------------------------------------------------------------------------------";
+        
+        std::string modifiedMessage = "Forwarder_Timestamp: " + timestamp.str() + "\n" + receivedData;
+        Ptr<Packet> newPacket = Create<Packet>((uint8_t*)modifiedMessage.c_str(), modifiedMessage.size());
+        socket->Send(newPacket);
     }
  }
 
 
 static void GenerateTraffic(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCount, Time pktInterval)
+
 {
+        std::time_t currentTime= std::time(nullptr);
+        char buffer[100];
+        std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&currentTime));
+        std::string timeString=buffer;
         if (pktCount > 0 && pktCount <51)
         {
-                msg = receivedData;
+                msg = receivedData + "\nForwarder_Timestamp:" + timeString;
                 std::cout<<!msg.empty()<<std::endl;
                 std::cout<<msg<<std::endl;
                 if(!msg.empty())
                 {       
-                        msg=msg+"4";
+                        //msg=msg+"4";
                         ns3::Ptr<ns3::Packet> packet = ns3::Create<ns3::Packet>((uint8_t*)::msg.c_str(),::msg.length());
                         socket->Send(packet);
  
@@ -162,12 +189,14 @@ static void GenerateTraffic(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCo
                         std::cout<<"pktCount: "<<pktCount<<std::endl;
 
                 }
-                Simulator::Schedule(pktInterval, &GenerateTraffic, socket, pktSize, pktCount - 1, pktInterval);
+                else{
+                        msg= "Forwarder_Timestamp: " + timeString + "\nMode: Not Connected";
+                Simulator::Schedule(pktInterval, &GenerateTraffic, socket, pktSize, pktCount - 1, pktInterval);}
                 
 
         }
         else
-        {
+        {       
                 std::cout<<"Closing Connection"<<std::endl;
                 socket->Close();
         }
@@ -177,8 +206,8 @@ static void GenerateTraffic(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCo
  int main (int argc, char *argv[])
  {
    uint16_t sinkPort = 80;
-   uint32_t packetSize = 1000; // bytes
-   uint32_t pktcount = 50;
+   //uint32_t packetSize = 1000; // bytes
+   //uint32_t pktcount = 50;
    double interval = 1.0;
    Time interPacketInterval = Seconds(interval);
    std::string dataRate("1000Mb/s");
@@ -245,15 +274,15 @@ static void GenerateTraffic(Ptr<Socket> socket, uint32_t pktSize, uint32_t pktCo
    //pointToPoint.EnablePcapAll("tcp-bulk-send", false);
  
    //pcap file generation 
-   emu.EnablePcap ("fd-receiver-forwarder", device);
+   emu.EnablePcap ("forwarder_final", device);
  
    //30s ->5s to match sender
-   Simulator::Schedule(Seconds(5.0),
-                        &GenerateTraffic,
-                        clientSoc,
-                        packetSize,
-                        pktcount,
-                        interPacketInterval);
+   //Simulator::Schedule(Seconds(5.0),
+                        //&GenerateTraffic,
+                        //clientSoc,
+                        //packetSize,
+                        //pktcount,
+                        //interPacketInterval);
  
    Simulator::Stop (Seconds (600.0));
    Simulator::Run ();
